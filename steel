@@ -1,0 +1,184 @@
+module Steel
+  module_function
+  def bar(type,cost=1)
+    if $game_variables[565]==0
+      $game_variables[565]={}
+    end
+    if $game_variables[565][$game_map.map_id]==nil
+      $game_variables[565][$game_map.map_id]=0
+    end
+    if $game_variables[565][0]==nil
+      $game_variables[565][0]=[{},0,0,0,0]
+    end
+    if $game_variables[565][0][0][$game_map.map_id]==nil
+      $game_variables[565][0][0][$game_map.map_id]=1
+    end
+    return true if skill==4 && type==4
+    if level(4)==0
+      return false if skill%10==4
+    elsif level(4)>0 && type==4
+      return false if $game_variables[565][0][0][$game_map.map_id]>value(4)[0]
+      return false if $game_party.item_number(85)<$game_variables[565][0][0][$game_map.map_id]
+      $game_party.lose_item(85,$game_variables[565][0][0][$game_map.map_id])
+      $game_variables[565][0][0][$game_map.map_id]+=1
+      $game_variables[565][$game_map.map_id]=type
+      $game_switches[802]=true
+      return true
+    end
+    return false if skill==type
+    return false if $game_party.item_number(85)<1
+    $game_party.lose_item(85,1)
+    $game_variables[565][$game_map.map_id]=type
+    $game_switches[802]=true
+    return true
+  end
+  def update(type)
+    if level(type)>0
+      return false
+    else
+      $game_variables[565][0][type]=1
+      return true
+    end
+  end
+  def level(type)
+    if $game_variables[565]==0
+      $game_variables[565]={}
+    end
+    if $game_variables[565][0]==nil
+      $game_variables[565][0]=[{},0,0,0,0]
+    end
+    return $game_variables[565][0][type]
+  end
+  def value(type)
+    value=[[],
+    [[4000000,1.15],[8000000,1.25]], #【磷燃烧弹模块】
+    [[100000],[150000]], #【超限过载模块】
+    [[5],[10]], #【烟幕掩护模块】
+    [[1],[9999]], #【超频爆破模块】
+    ]
+    return value[type][level(type)]
+  end
+  def state
+    value=["无",
+    "【磷燃烧弹模块】",
+    "【超限过载模块】",
+    "【烟幕掩护模块】",
+    "【超频爆破模块】"
+    ]
+    return value[skill%10]
+  end
+  def skill
+    return 0 if $game_variables[565]==0
+    return 0 if $game_variables[565][$game_map.map_id]==nil
+    return $game_variables[565][$game_map.map_id]
+  end
+  def eskill
+    $game_variables[565][$game_map.map_id]+=10
+  end
+  def clear
+    $game_party.gain_item(85,1)
+    $game_variables[565][$game_map.map_id]=0
+    $game_switches[802]=true
+  end
+end
+class Scene_Steel
+  def main
+    #@bitmap=Graphics.snap_to_bitmap
+    @spriteset=Spriteset_Map.new
+    #@sprite=Sprite.new
+    #@sprite.bitmap=@bitmap
+    @cursor=Sprite.new
+    @cursor.bitmap=Bitmap.new(32,32)
+    @cursor.bitmap.fill_rect(0,0,32,32,Color.new(0,255,0))
+    @cursor.opacity=128
+    @judge=Click.judge.clone
+    # 执行过渡
+    Graphics.transition
+    # 主循环
+    loop do
+      # 刷新游戏画面
+      Graphics.update
+      # 刷新输入信息
+      Input.update
+      # 按照地图、实例、主角的顺序刷新
+      # (本更新顺序不会在的满足事件的执行条件下成为给予角色瞬间移动
+      #  的机会的重要因素)
+      $game_map.update
+      # 刷新活动块
+      @spriteset.update
+      # 刷新画面
+      update
+      # 如果画面切换的话就中断循环
+      if $scene != self
+        break
+      end
+    end
+    # 准备过渡
+    Graphics.freeze
+    #@bitmap.dispose
+    @spriteset.dispose
+    #@sprite.bitmap.dispose
+    #@sprite.dispose
+    @cursor.bitmap.dispose
+    @cursor.dispose
+  end
+  def update
+    if @judge!=Click.judge
+      @judge=Click.judge.clone
+      @cursor.x=@judge[0]*32
+      @cursor.y=@judge[1]*32
+    end
+    if Kboard.trigger?(1)
+      check
+    end
+    if Kboard.trigger?(2) || Input.trigger?(Input::B)
+      #Steel.clear
+      $scene=Scene_Map.new
+    end
+  end
+  def check
+    x=@judge[0]+$game_map.display_x/128
+    y=@judge[1]+$game_map.display_y/128
+    if [x,y]==[$game_player.x,$game_player.y]
+      $game_player.animation_id=35
+      $game_actors[1].hp-=10000000000
+      if $game_actors[$game_variables[1]+1].hp<=0
+        $game_variables[19]=1
+        $game_temp.common_event_id =12#生命小于0，调用1号结局
+      end
+    end
+    if $game_map.have_an_event?(x,y)
+      id=$game_map.check_event(x,y)
+      name=$game_map.events[id].name
+      if name[0,6]=="怪物"
+        i=SF.eid(id)
+        unless Boom.got_p(i,61) #头目
+          Steel.eskill
+          gd=$data_enemies[i].gold
+          gd*=2 if $supskill.include?(134)
+          gd*=2 if $game_party.item_number(20)>0
+          #gd*=10 if $game_switches[867]
+          if Boom.got_p(i,138)
+            rate=$game_variables[521].size
+            gd+=(gd*0.15*rate).to_i
+          end
+          if Boom.got_p(i,173)#爆破支援
+            Boom.broken(id)
+          end
+          if Boom.got_p(i,87) && $game_party.item_number(144)==0
+            Ach.check(2006)
+          end
+          Boom.doend(gd,0,id,35)
+          Boom.dispose(id)
+          $scene=Scene_Map.new
+        end
+      end
+      if name.include?("门") || name.include?("路障")
+        Steel.eskill
+        Boom.doend(0,0,id,35)
+        Boom.dispose(id)
+        $scene=Scene_Map.new
+      end
+    end
+  end
+end
