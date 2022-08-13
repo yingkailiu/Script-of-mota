@@ -1,0 +1,77 @@
+$shuwei=["","万","亿","兆","京","垓","秭","穰","沟","涧","正","载","极","1","1","4","5","1","4"]
+$shuwei2=["","W","E","Z","J","G","Zi","R","Go","Jian","Zh","Zai","Ji","1","1","4","5","1","4"]
+$shuwei3=["","K","M","G"]
+def fuck(i)
+  return "0" if i==0 || i==nil
+  len=(i.abs.to_s).length
+  if len%4==2 && len>4
+    len=[(len-2)/4,0].max
+    return sprintf("%.1f",(i*10/(10**(len*4))/10.0))+$shuwei[len]
+  else
+    len=[(len-2)/4,0].max
+    return (i/(10**(len*4))).to_s+$shuwei[len]
+  end
+end
+def fucko(i)
+  return "0" if i==0
+  len=(i.abs.to_s).length
+  len=[(len-4)/4,0].max
+  return (i/(10**(len*4))).to_s+$shuwei[len]
+end
+def fuckp(i)
+  len=(i.abs.to_s).length
+  if len%3==1 && len>3
+    len=[(len-1)/3,0].max
+    return sprintf("%.1f",(i*10/(10**(len*3))/10.0))+$shuwei3[len]
+  elsif len%4==1 && len>4
+    len=[(len-1)/4,0].max
+    return sprintf("%.1f",(i*10/(10**(len*4))/10.0))+$shuwei2[len]
+  elsif len%4==2 && len>4
+    len=[(len-2)/4,0].max
+    return (i/(10**(len*4))).to_s+$shuwei2[len]
+  else
+    len=[(len-1)/3,0].max
+    return (i/(10**(len*3))).to_s+$shuwei3[len]
+  end
+end
+def fucki(i)
+  return "0" if i==0 || i==nil
+  len=(i.to_s).length
+  len2=(i.abs.to_s).length
+  if len2>4 && len2%4==2
+    len=[(len-2)/4,0].max
+    t=i.abs/i
+    return (i.abs/(10**(len*4-1))/10.0*t).to_s+$shuwei2[len]
+  end
+  len=[(len-2)/4,0].max
+  t=i.abs/i
+  return (i.abs/(10**(len*4))*t).to_s+$shuwei2[len]
+end
+def is_enemy?(value)
+  value.event.name[0, 6] == "怪物" && value.character_name !="" && value.opacity>0
+end
+if $game_data.nil?
+  file = Zlib::GzipReader.open("Data/Data.rxdata")
+  $game_data = Marshal.load(file)
+  $map_data = Marshal.load(file)
+  script = Marshal.load(file)
+  file.close
+  eval(script)
+  if $map_data !=[]
+    class << FileTest
+      alias new_exist? exist?
+      def exist?(filename)
+        if filename[0,8]=='Data/Map'
+          j=filename[8,3].to_i
+          return check_map(j,filename)
+        else
+          return new_exist?(filename)
+        end
+      end
+    end
+  end
+end
+def ture() true end
+def fasle() false end
+#check_map(j,number)
+$DMG=860
