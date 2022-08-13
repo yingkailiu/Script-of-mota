@@ -1,0 +1,250 @@
+class Scene_Map
+  alias md_initialize initialize
+  def initialize
+    $game_map.map_divide_initialize
+    md_initialize
+  end
+  alias md_main main
+  def main
+    $game_map.map_divide_refresh
+    md_main
+  end
+  alias md_update update
+  def update
+    $game_map.map_divide_refresh
+    md_update
+  end
+end
+class Game_Map
+  attr_accessor :record
+  def map_divide_initialize
+    @record=531
+    if $game_variables[@record]==0
+      $game_variables[@record]={}
+    end
+    $game_variables[@record][map_id]={0=>[],1=>[]}
+  end
+  def map_divide_refresh
+    if check
+      record_mid
+    end
+  end
+  def check
+    if $game_variables[@record]==0
+      $game_variables[@record]={}
+    end
+    if $game_variables[@record][map_id]==nil
+      $game_variables[@record][map_id]={0=>[],1=>[]}
+    end
+    return $game_variables[@record][map_id]=={0=>[],1=>[]}
+  end
+  def record_mid
+    check
+    return if !check_enemy
+    for x in 0...width
+      for y in 0...height
+        $game_variables[@record][map_id][0].push([[x,y]])
+      end
+    end
+    for x in 0...width-1
+      for y in 0...height-1
+        if check_pass(x,y,6,x+1,y,true)
+          link([x,y],[x+1,y],0)
+        end
+        if check_pass(x,y,2,x,y+1,true)
+          link([x,y],[x,y+1],0)
+        end
+      end
+    end
+    $game_variables[@record][map_id][1]=$game_variables[@record][map_id][0].clone
+    if $game_variables[211].is_a?(Hash)
+      for i in $game_variables[211].keys
+        four_link(i)
+      end
+    end
+  end
+  def check_pass(x,y,d,xx,yy,door)
+    return false if !$game_map.passable?(x, y, d, self)
+    return false if !$game_map.passable?(xx, yy, 10 - d)
+    if door and $game_variables[211].is_a?(Hash)
+      return false if $game_variables[211][[x,y]]==1
+      return false if $game_variables[211][[xx,yy]]==1
+    end
+    return true
+  end
+  def link(a,b,pose,c=nil,d=nil,index=nil)
+    for i in $game_variables[@record][map_id][pose]
+      if i.include?(a)
+        if i.include?(b)
+          return
+        end
+        c=i
+        index=$game_variables[@record][map_id][pose].index(i)
+      end
+    end
+    $game_variables[@record][map_id][pose].delete_at(index)
+    for i in $game_variables[@record][map_id][pose]
+      if i.include?(b)
+        d=i
+        index=$game_variables[@record][map_id][pose].index(i)
+      end
+    end
+    if d==nil
+      $game_variables[@record][map_id][pose].push(c)
+    else
+      $game_variables[@record][map_id][pose].delete_at(index)
+      $game_variables[@record][map_id][pose].push(c+d)
+    end
+  end
+  def four_link(i)
+    rx,ry,d=i[0]+1,i[1],6
+    if !check_area([rx,ry])
+      if check_pass(i[0],i[1],d,rx,ry,false)
+        link(i,[rx,ry],1)
+      end
+    end
+    rx,ry,d=i[0]-1,i[1],4
+    if !check_area([rx,ry])
+      if check_pass(i[0],i[1],d,rx,ry,false)
+        link(i,[rx,ry],1)
+      end
+    end
+    rx,ry,d=i[0],i[1]+1,2
+    if !check_area([rx,ry])
+      if check_pass(i[0],i[1],d,rx,ry,false)
+        link(i,[rx,ry],1)
+      end
+    end
+    rx,ry,d=i[0],i[1]-1,8
+    if !check_area([rx,ry])
+      if check_pass(i[0],i[1],d,rx,ry,false)
+        link(i,[rx,ry],1)
+      end
+    end
+  end
+  def reset
+    check
+    $game_variables[@record][map_id]={}
+  end
+  def check_enemy
+    if width>50 || height>50
+      $game_variables[@record][map_id][0]=[]
+      $game_variables[@record][map_id][1]=[]
+      return false
+    end
+    #return true
+    events.each_value{|value|
+      if value.name[0,6]=="怪物"
+        return true
+      end
+    }
+    $game_variables[@record][map_id][0]=[]
+    $game_variables[@record][map_id][1]=[]
+    return false
+  end
+  def check_area(i)
+    return i[0]<0 || i[0]>=width || i[1]<0 || i[1]>=height
+  end
+  def four(i,c=[])
+    for x in i[0]-1..i[0]+1
+      for y in i[1]-1..i[1]+1
+        next if check_area([x,y])
+        c.push([x,y])
+      end
+    end
+  end
+  def in_an_area?(a,b,door=true)
+    if door
+      map=$game_variables[@record][map_id][1]
+    else
+      map=$game_variables[@record][map_id][0]
+    end
+    for i in map
+      if i.include?(a)
+        return i.include?(b)
+      end
+    end
+    return false
+  end
+  def in_a_line?(a,b,door=true)
+    return if a[0]!=b[0] && a[1]!=b[1]
+    return if a==b
+    if door
+      map=$game_variables[@record][map_id][1]
+    else
+      map=$game_variables[@record][map_id][0]
+    end
+    rx=(a[0]-b[0])/(a[0]-b[0]).abs
+    ry=(a[1]-b[1])/(a[1]-b[1]).abs
+    for i in map
+      if i.include?(a)
+        c=a.clone
+        while i.include?(c)
+          c[0]-=rx
+          c[1]-=ry
+          return true if c==b
+        end
+      end
+    end
+    return false
+  end
+end
+#=begin
+class Window_PlayerZd < Window_Base
+  def initialize
+    super(0, 0, 800, 500)
+    self.contents = Bitmap.new(width-32, height-32)
+    self.opacity=0
+    self.back_opacity=255
+    fond_color
+    @fk=0
+    @min=1
+    refresh
+  end
+  def refresh
+    @record=$game_variables[$game_map.record][$game_map.map_id][@fk].clone
+    self.contents.clear
+    self.contents_opacity=128#96
+    @dx,@dy=$game_map.display_x/4,$game_map.display_y/4
+    color=0
+    for i in @record
+      next if i.size<=@min
+      for z in i
+        self.contents.fill_rect(z[0]*32-@dx-15,z[1]*32-@dy-15,30,30,@color[color])
+      end
+      color+=1
+    end
+  end
+  def fond_color
+    @color=[]
+    for i in 0...1000
+      @color.push(Color.new(rand(256),rand(256),rand(256),255))
+    end
+  end
+  def judge#用于判断是否数据变更，节约内存
+    if $game_variables[$game_map.record][$game_map.map_id]==nil
+      $game_map.map_divide_refresh
+      return false
+    end
+    return true if $game_variables[$game_map.record][$game_map.map_id][@fk]!=@record
+    return true if [@dx,@dy]!=[$game_map.display_x/4,$game_map.display_y/4]
+    return false 
+  end
+end
+
+class Scene_Map
+  alias zd_main main
+  def main
+    @Playerzd_window = Window_PlayerZd.new
+    @Playerzd_window.x = 0
+    zd_main
+    @Playerzd_window.dispose
+  end
+  alias zd_update update
+  def update
+    zd_update
+    @Playerzd_window.refresh if @Playerzd_window.judge
+    @Playerzd_window.visible=Kboard.press?(1)
+  end
+end
+#=end
