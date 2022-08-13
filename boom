@@ -1,0 +1,178 @@
+module Boom
+  
+  module_function
+  def boom
+    if $game_variables[41].include?(@map_id)==false
+      $game_variables[41][@map_id]=[]
+    end
+    v=$game_variables[90]#使用楼层范围变量来定位
+    for x in v[0]...v[0]+v[1]
+      for y in v[2]...v[2]+v[3]
+        if $game_map.have_an_event?(x,y)==true
+          @iid=$game_map.check_event(x,y)
+          #if $game_map.events[@iid].event.name=="黄门"
+          if $game_map.events[@iid].event.name.include?("门")
+            $game_self_switches[[@map_id,@iid,"A"]]=true
+            $game_map.events[@iid].event.name="dead"
+            $game_map.events[@iid].erase
+            $game_variables[41][@map_id].insert 0,@iid
+          end
+        end
+      end
+    end
+    #清除地图第1层中的图块元素
+    $第0层为背景，1层只画墙，2层画熔岩，砖等图块
+    $game_variables[22][$game_variables[22].size+1]=@map_id
+    v=$game_variables[90]#使用楼层范围变量来定位
+    for x in v[0]...v[0]+v[1]
+      for y in v[2]...v[2]+v[3]
+        $game_map.data[x,y,$game_variables[87]]=0
+        if $game_map.have_an_event?(x,y)
+          @iid=$game_map.check_event(x,y)
+          if $game_map.events[@iid].event.name=="暗墙"
+            $game_map.events[@iid].event.name="dead"
+            $game_variables[41][@map_id].insert 0,@iid       
+            $game_map.events[@iid].erase
+            $game_self_switches[[@map_id,@iid,"A"]]=true
+          end
+        end
+      end
+    end
+  end
+  def fuck
+    SF.map.events.each_pair{|id,ev|
+    if ev.name[0,6]=="怪物" && ev.character_name !="" && ev.opacity>0
+      i=SF.eid(id)
+      next if got_p(i,61)
+      hp,mdef,mdec,gd,exp=get_edt(i)
+      doend(gd,exp,id,198)
+      dispose(id)
+    end}
+  end
+  def broken(idx1,dy1=1,dx2=1,y2=-1)
+    if y2==-1
+      ev=$game_map.events[idx1]
+      x1=ev.x-dx2
+      x2=ev.x+dx2
+      y1=ev.y-dy1
+      y2=ev.y+dy1
+    else
+      x1=idx1
+      y1=dy1
+    end
+    for x in x1..x2
+      for y in y1..y2
+        if x==$game_player.x && y==$game_player.y
+          enemy=$data_enemies[SF.eid(ev.id)]
+          $game_actors[1].hp-=enemy.atk*20
+          check_hp
+        end
+        if $game_map.have_an_event?(x,y)
+          id=$game_map.check_event(x,y)
+          next if id==idx1
+          eev=$game_map.events[id]
+          if true#eev.name[0,6]=="怪物" && eev.character_name !="" && eev.opacity>0
+            Boom.doend(0,0,id,35)
+            Boom.dispose(id)
+          end
+        end
+      end
+    end
+  end
+  def get_edt(id,mdef=1,mdec=0)
+    hp=$data_enemies[id].maxhp
+    #if $data_enemies[id].str>=11
+    #  mdef=(100-$data_enemies[id].mdef)/100.0
+    #end
+    #if got_p(id,32)
+    #  mdec=got_p_value(id,32).split("-")[1]
+    #end
+    gd=got_gold(id)
+    #if $game_switches[65] #作弊模式
+    #  gd*=2
+    #end
+    #if $game_variables[348]!=0 #额外金币
+    #  gd*=1+$game_variables[348]/100.0
+    #  gd=gd.ceil
+    #end
+    exp=$data_enemies[id].exp
+    return hp,mdef,mdec,gd,exp
+  end
+  def got_gold(eid,e=nil)
+    bgd=$data_enemies[eid].gold
+    gd=$data_enemies[eid].gold
+    gd*=2 if $supskill.include?(134)
+    gd*=2 if $game_party.item_number(20)>0
+    gd*=10 if $game_switches[867]
+    if e!=nil && e.got_p(138)
+      rate=$game_variables[521].size
+      gd+=(gd*0.15*rate).to_i
+    end
+    if $game_switches[753] && $shuniu
+      gd+=(gd*0.1).to_i
+    end
+    if $game_variables[604]>0
+      $game_variables[604]-=1
+      gd+=bgd*2
+    end
+    if e!=nil && e.got_p(210) && $game_variables[209]==0
+      gd+=bgd*4
+    end
+    if e!=nil && e.got_p(217)
+      gd+=bgd*$game_variables[378]
+    end
+    return gd
+  end
+  def doend(gd,exp,value_id,aid)
+    $game_party.gain_gold(gd)
+    $game_actors[1].exp+=exp
+    $game_map.events[value_id].animation_id=aid
+  end
+  def dispose(id)
+    $game_map.events[id].event.name="dead"
+    $game_variables[41][$game_map.map_id]=[] if $game_variables[41][$game_map.map_id]==nil
+    $game_variables[41][$game_map.map_id].insert(0,id)
+    $game_self_switches[[$game_map.map_id,id,"A"]]=true
+  end
+  #--------------------------------------------------------------------------
+  # ● 返回怪物的属性
+  #--------------------------------------------------------------------------
+  def got_p(i,val)
+    if $game_party.have_item?(189)#祝福髓液
+      return false if $data_skills[val].plus_state_set.include?(5)
+    end
+    if $game_party.have_item?(181)#骨质炼化
+      return false if val==33
+    end
+    if $game_switches[114]
+      return $data_enemies[i].element_ranks[val]==1
+    else
+      return [1,6].include?($data_enemies[i].element_ranks[val])
+    end
+  end
+end
+def check_hp
+  if $game_actors[$game_variables[1]+1].hp<=0
+    $game_variables[19]=1
+    $game_temp.common_event_id =12#生命小于0，调用1号结局
+  end  
+end
+
+#===========================================================================
+# Game_Map，把events变量公开
+#===========================================================================
+class Game_Map
+  attr_reader   :events
+end
+
+#===========================================================================
+# 便于返回姓名
+#===========================================================================
+class Game_Event < Game_Character
+  def name
+    return @event.name
+  end
+  def name=(na)
+    @event.name = na
+  end
+end
