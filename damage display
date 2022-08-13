@@ -1,0 +1,555 @@
+MAX_EVENT_SIZE=200  #最大事件数，默认13*13=169
+
+class Map_damage
+  
+  attr_accessor :canvas, :refresh_on_step
+  #初始化
+  def initialize
+    @mapid = $game_map.map_id
+    @canvas=[]
+    @damage_enemy = {}
+    @bitmaps_enemy = {}
+    for i in 1...MAX_EVENT_SIZE+1
+      @canvas[i]=Sprite.new
+      @canvas[i].bitmap=Bitmap.new(32,32)
+      @canvas[i].z=40
+    end
+    @refresh_on_step = false
+    @save_count=0
+    @colordata=[
+      Color.new(0,0,0),Color.new(0, 255, 0),Color.new(255, 255, 255),
+      Color.new(255, 255, 0),Color.new(255, 127, 0),Color.new(255, 0, 0)
+    ]
+  end
+  def dispose
+    for i in 1...MAX_EVENT_SIZE+1
+      @canvas[i].bitmap.dispose
+      @canvas[i].dispose
+    end
+    @bitmaps_enemy.clear
+  end
+
+  # 这里设置启用前提条件（怪物手册等等），必须返回true（启用）或false（禁用）
+  def enable?
+    # 怪物手册（4号物品）持有时启用
+    # 同时要求55号开关开启，可以在初始化中进行调整
+    return false if !$game_switches[55]
+    return $game_party.item_number(4) != 0
+  end
+  def clear
+    @damage_enemy.clear
+    @bitmaps_enemy.clear
+    for i in 1...MAX_EVENT_SIZE+1
+      @canvas[i].bitmap.clear
+    end
+  end
+  
+  def resetxy(id,x,y)
+    @canvas[id].x=x-17
+    @canvas[id].y=y-9
+  end
+  def setvisible(id,sw)
+    @canvas[id].visible=sw
+  end
+
+  # 这里设置显示前提条件（潜伏怪、机关不显示等等）
+  def render?(id, x, y, eid)
+    old = false
+    # 兼容性测试
+    test = got_p(id,1) rescue old = true
+    
+    if old
+      if got_p(id,11)
+        # 有潜伏怪则每步刷新
+        @refresh_on_step = true
+        if $game_party.item_number($game_variables[79]) == 0
+          return false # 潜伏怪不显示伤害(持有反潜伏的79号物品后显示）
+        elsif !((x-$game_player.x).abs+(y-$game_player.y).abs <= $game_variables[84])
+          return false
+        end
+      end
+      norevive = false
+      iserase = $game_map.events[eid].iserase rescue norevive = true
+      if !norevive
+        if got_p(id,16) and iserase # 重生怪打败后暂时不显示伤害
+          return false
+        end
+      end
+    else
+      # 兼容性测试
+      special = true
+
+      if got_p(id,11)
+        # 有潜伏怪则每步刷新
+        @refresh_on_step = true
+        if $game_party.item_number($game_variables[79]) == 0
+          return false # 潜伏怪不显示伤害(持有反潜伏的物品后显示）
+        elsif !((x-$game_player.x).abs+(y-$game_player.y).abs<=$game_variables[84])
+          return false
+        end
+      end
+      
+      if got_p(id,16) and $game_map.events[eid].iserase # 重生怪打败后暂时不显示伤害
+        return false
+      end
+    end
+    return true
+  end
+
+  # 这里设置不同伤害的不同颜色，damage是敌人伤害，必须返回Color类的实例（用Color.new生成）
+  def color?(damage)
+    hp = $game_actors[$game_variables[1] + 1].hp # 勇士生命
+    ratio = 1.0 * damage / hp
+    if ratio <= 0 # 无伤害
+      return @colordata[1] # 绿
+    elsif ratio < 1.0 / 3.0 # 伤害小于勇士血量1/3
+      return @colordata[2] # 白
+    elsif ratio < 2.0 / 3.0 # 伤害在勇士血量1/3到2/3之间
+      return @colordata[3] # 黄
+    elsif ratio < 1.0 # 伤害在勇士血量2/3到1之间
+      return @colordata[4] # 橙
+#    elsif damage != 99999999999999999999999 # 伤害大于等于勇士血量
+    else
+      return @colordata[5] # 红
+#    else # 无敌怪且无十字架
+#      return @colordata[0] # 黑
+    end
+  end
+
+  # 刷新。手动刷新也用这个方法
+  def refresh
+    return if @save_count==Graphics.frame_count
+    @save_count=Graphics.frame_count 
+    EnemyReady.refresh
+    if enable?
+      @refresh_on_step = false
+      if @map_id != $game_map.map_id
+        clear
+        @map_id = $game_map.map_id
+      end
+      
+      $game_map.events.each_value{ |value|
+        event = value.event
+        name = event.name
+        if name[0, 6] == "怪物" && value.character_name !=""
+          id = name[6, name.length - 1].to_i
+          eid = event.id
+          draw_by_enemy(id, eid)
+          draw_by_id(id, event.x, event.y, eid)
+        else
+          @canvas[event.id].bitmap = Bitmap.new(32, 32) if @canvas[event.id]
+        end
+      }
+    end
+  end
+  
+  
+  
+  def draw_by_id(id, x, y, eid)
+    # 获得Enemy_property对象
+    if !render?(id, x, y, eid)
+      @canvas[eid].visible=false
+    else
+      @canvas[eid].visible=true
+    end
+    
+    # 设置为对应的Bitmap
+    @canvas[eid].bitmap = @bitmaps_enemy[id]
+    
+  end
+  
+  # 显伤描绘优化：所有的同一种怪物用同一个Bitmap表示
+  def draw_by_enemy(id, eventid)
+    # 获得伤害字符串
+    j=0
+    for i in $floorenemies
+      if i==id
+        damage = $fledam[j]
+        res = $fleres[j]
+        break
+      end
+      j+=1
+    end
+    main_color = color?(damage)
+    
+    # 如果伤害量和伤害颜色都没变化，则不重新描绘
+    return if [damage, main_color] == @damage_enemy[id]
+    
+    if res == 1
+      damage_s = "????"
+    elsif res == 2
+      damage_s = "?????"
+    elsif (damage < 100000 and damage > -9999)
+      damage_s = damage.to_s
+    else
+       def fucki(i)
+          return "0" if i==0
+          len=(i.to_s).length
+          len2=(i.abs.to_s).length
+          if len2>4 && len2%4==2
+            len=[(len-2)/4,0].max
+            t=i.abs/i
+            return (i.abs/(10**(len*4-1))/10.0*t).to_s+$shuwei2[len+$game_variables[150]]
+          end
+          if len2>4 && len2%4==1
+            len=[(len-1)/4,0].max
+            t=i.abs/i
+            return (i.abs/(10**(len*4-1))/10.0*t).to_s+$shuwei2[len+$game_variables[150]]
+          end
+          len=[(len-1)/4,0].max
+          t=i.abs/i
+          return (i.abs/(10**(len*4))*t).to_s+$shuwei2[len+$game_variables[150]]
+        end
+
+      damage_s = fucki(damage)   
+    end
+    
+    # 画出来并加边框
+    @bitmaps_enemy[id] ||= Bitmap.new(40, 40)
+    t = @bitmaps_enemy[id]
+    t.clear
+    t.font.name = "Arial Black" # 字体随便换
+    t.font.size = 12 # 字体大小不能太大
+    t.font.color = @colordata[0]
+    t.draw_text(2,0, 13 * damage_s.length, 12, damage_s)
+    t.draw_text(0,0, 13 * damage_s.length, 12, damage_s)
+    t.draw_text(2,2, 13 * damage_s.length, 12, damage_s)
+    t.draw_text(0,2, 13 * damage_s.length, 12, damage_s)
+    t.font.color = main_color
+    t.draw_text(1,1 ,13 * damage_s.length, 12, damage_s)
+
+    # 记录新的伤害量和颜色
+    @damage_enemy[id] = [damage, main_color]
+    
+  end
+
+end
+
+# 追加定义Window_PlayerDate类，能力改变时刷新
+class Window_PlayerDate
+  alias :old_refresh :refresh
+  def refresh
+    old_refresh
+    $mapdamage_obj.refresh
+  end
+
+end
+
+# 追加定义Game_Party类
+class Game_Party
+  
+  alias :old_gain_item :gain_item
+  alias :old_increase_steps :increase_steps
+  
+  # 获得怪物手册或反潜伏物品或反无敌物品时刷新
+  def gain_item(item_id, n)
+    old_gain_item(item_id, n)
+    if item_id == 4 or item_id == $game_variables[79] or item_id == $game_variables[71]
+      $mapdamage_obj.refresh if $mapdamage_obj != nil
+    end
+  end
+  
+  # 若有潜伏怪则每步刷新
+  def increase_steps
+    old_increase_steps
+    if $mapdamage_obj != nil and $mapdamage_obj.refresh_on_step
+      $game_map.events.each_value{ |value|
+        event = value.event
+        name = event.name
+        if name[0, 6] == "怪物" && value.character_name !=""
+          if !$mapdamage_obj.render?(name[6, name.length - 1].to_i, event.x, event.y, event.id)
+            $mapdamage_obj.canvas[event.id].visible=false
+          else
+            $mapdamage_obj.canvas[event.id].visible=true
+          end
+        end
+      }
+    end
+  end
+  
+end
+
+class Game_Map
+  def refresh
+    # 地图 ID 有效
+    if @map_id > 0
+      check=false
+      # 刷新全部的地图事件
+      for event in @events.values
+        check=true if event.refresh==true && event.event.name[0,6] == "怪物"
+      end
+      $mapdamage_obj.refresh if check
+      # 刷新全部的公共事件
+      for common_event in @common_events.values
+        common_event.refresh
+      end
+    end
+    # 清除刷新要求标志
+    @need_refresh = false
+  end
+end
+
+# 追加定义Game_Event类，提供是否擦除的获取器
+class Game_Event
+  def iserase
+    return @erased
+  end
+  def refresh
+    # 初始化本地变量 new_page
+    new_page = nil
+    # 无法暂时小时的情况下
+    unless @erased
+      # 从编号大的事件页按顺序调查
+      for page in @event.pages.reverse
+        # 可以参考事件条件 c
+        c = page.condition
+        # 确认开关条件 1 
+        if c.switch1_valid
+          if $game_switches[c.switch1_id] == false
+            next
+          end
+        end
+        # 确认开关条件 2 
+        if c.switch2_valid
+          if $game_switches[c.switch2_id] == false
+            next
+          end
+        end
+        # 确认变量条件
+        if c.variable_valid
+          if $game_variables[c.variable_id] < c.variable_value
+            next
+          end
+        end
+        # 确认独立开关条件
+        if c.self_switch_valid
+          key = [@map_id, @event.id, c.self_switch_ch]
+          if $game_self_switches[key] != true
+            next
+          end
+        end
+        # 设置本地变量 new_page
+        new_page = page
+        # 放弃循环
+        break
+      end
+    end
+    # 与上次同一事件页的情况下
+    if new_page == @page
+      # 过程结束
+      return
+    end
+    setup_page(new_page)
+    if @erased# && @event.name[0,6]=="怪物"
+      for page in @event.pages.reverse
+        # 可以参考事件条件 c
+        c = page.condition
+        # 确认开关条件 1 
+        if c.switch1_valid
+          if $game_switches[c.switch1_id] == false
+            next
+          end
+        end
+        # 确认开关条件 2 
+        if c.switch2_valid
+          if $game_switches[c.switch2_id] == false
+            next
+          end
+        end
+        # 确认变量条件
+        if c.variable_valid
+          if $game_variables[c.variable_id] < c.variable_value
+            next
+          end
+        end
+        # 确认独立开关条件
+        if c.self_switch_valid
+          key = [@map_id, @event.id, c.self_switch_ch]
+          if $game_self_switches[key] != true
+            next
+          end
+        end
+        break
+      end
+      @character_name = page.graphic.character_name
+      @character_hue = page.graphic.character_hue
+      @direction = page.graphic.direction
+      @original_direction = @direction
+      @prelock_direction = 0
+      @pattern = page.graphic.pattern
+      @original_pattern = @pattern
+      page.graphic.opacity
+      @opacity = page.graphic.opacity/2
+      @blend_type = page.graphic.blend_type
+    end
+    return true
+  end
+  def setup_page(new_page)
+    # @page 设置为现在的事件页
+    @page = new_page
+    # 清除启动中标志
+    clear_starting
+    # 没有满足条件的页面的时候
+    if @page == nil
+      # 设置各实例变量
+      @tile_id = 0
+      @character_name = ""
+      @character_hue = 0
+      @move_type = 0
+      @through = true
+      @trigger = nil
+      @list = nil
+      @interpreter = nil
+      # 过程结束
+      return
+    end
+    # 设置各实例变量
+    @tile_id = @page.graphic.tile_id
+    @character_name = @page.graphic.character_name
+    @character_hue = @page.graphic.character_hue
+    if @original_direction != @page.graphic.direction
+      @direction = @page.graphic.direction
+      @original_direction = @direction
+      @prelock_direction = 0
+    end
+    if @original_pattern != @page.graphic.pattern
+      @pattern = @page.graphic.pattern
+      @original_pattern = @pattern
+    end
+    @opacity = @page.graphic.opacity
+    @blend_type = @page.graphic.blend_type
+    @move_type = @page.move_type
+    @move_speed = @page.move_speed
+    @move_frequency = @page.move_frequency
+    @move_route = @page.move_route
+    @move_route_index = 0
+    @move_route_forcing = false
+    @walk_anime = @page.walk_anime
+    @step_anime = @page.step_anime
+    @direction_fix = @page.direction_fix
+    @through = @page.through
+    @always_on_top = @page.always_on_top
+    @trigger = @page.trigger
+    @list = @page.list
+    @interpreter = nil
+    # 目标是 [并行处理] 的情况下
+    if @trigger == 4
+      # 生成并行处理用解释器
+      @interpreter = Interpreter.new
+    end
+    # 自动事件启动判定
+    check_event_trigger_auto
+  end
+end
+
+
+# 追加定义Sprite_Character类
+class Sprite_Character < RPG::Sprite
+  alias :old_update :update
+  def update
+    old_update
+    if self != $game_player && @character.id>0
+      $mapdamage_obj.resetxy(@character.id,self.x,self.y)
+    end
+  end
+end
+
+# 追加定义Scene_Map类
+class Scene_Map
+
+  # 地图初始化时初始化并刷新
+  def initialize
+    $mapdamage_obj.dispose if $mapdamage_obj != nil && !$mapdamage_obj.canvas[1].disposed? 
+    $mapdamage_obj = Map_damage.new
+    $mapdamage_obj.refresh
+  end
+  
+  # 场所移动时刷新
+  def transfer_player
+    # 清除主角场所移动调试标志
+    $game_temp.player_transferring = false
+    # 移动目标与现在的地图有差异的情况下
+    if $game_map.map_id != $game_temp.player_new_map_id
+      # 设置新地图
+      $game_map.setup($game_temp.player_new_map_id)
+    end
+    # 设置主角位置
+    $game_player.moveto($game_temp.player_new_x, $game_temp.player_new_y)
+    # 设置主角朝向
+    case $game_temp.player_new_direction
+    when 2  # 下
+      $game_player.turn_down
+    when 4  # 左
+      $game_player.turn_left
+    when 6  # 右
+      $game_player.turn_right
+    when 8  # 上
+      $game_player.turn_up
+    end
+    # 矫正主角姿势
+    $game_player.straighten
+    # 刷新地图 (执行并行事件)
+    $game_map.update
+    # 在生成活动块
+    @spriteset.dispose
+    @spriteset = Spriteset_Map.new
+    # 处理过渡中的情况下
+    $mapdamage_obj.refresh_on_step = false
+    $mapdamage_obj.refresh 
+    if $game_temp.transition_processing
+      # 清除过渡处理中标志
+      $game_temp.transition_processing = false
+      # 执行过渡
+      Graphics.transition(20)
+    end
+    # 执行地图设置的 BGM、BGS 的自动切换
+    $game_map.autoplay
+    # 设置画面
+    Graphics.frame_reset
+    # 刷新输入信息
+    Input.update
+  end
+
+end
+
+# 追加定义Scene_Title类，返回标题画面时去除所有伤害显示
+class Scene_Title
+  
+  def initialize
+    $mapdamage_obj.clear if $mapdamage_obj != nil && !$mapdamage_obj.canvas[1].disposed? 
+  end
+  
+end
+
+# 追加定义Interpreter类
+class Interpreter
+  
+  alias :old_command_117 :command_117
+  alias :old_command_end :command_end
+  alias :old_setup :setup
+  
+  def command_117
+    @common_event_id = @parameters[0]
+    old_command_117
+  end
+  
+  def command_end
+    old_command_end
+    return if @common_event_id == nil or $mapdamage_obj == nil
+    # 战斗事件结束后刷新
+    if @common_event_id == 1
+      $mapdamage_obj.refresh
+    end
+    # 结局判定后清除
+    if @common_event_id == 12
+      $mapdamage_obj.clear
+    end
+    @common_event_id = 0
+  end
+end
+
+def got_p(id,val)
+  table=[false,true,false,false,false,false,false]
+  return false if $data_enemies[id].element_ranks[val]==nil
+  return table[$data_enemies[id].element_ranks[val]]
+end
