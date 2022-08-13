@@ -1,0 +1,251 @@
+Iconname = "Blink" # 纯色可替换为图片
+Icons = FileTest.exist?("Graphics/Icons/" + Iconname + ".png") # 检测图片是否存在
+Zuji_size = 2 # 警报的范围 0为十字范围，1以上为九宫格(?)
+
+
+class Spriteset_Map
+  #--------------------------------------------------------------------------
+  # ● 重定义
+  #--------------------------------------------------------------------------
+  alias initialize_v3 initialize
+  alias dispose_v3 dispose
+  alias update_v3 update
+  #--------------------------------------------------------------------------
+  # ● 初始化对像
+  #--------------------------------------------------------------------------
+  def initialize
+    initialize_v3
+    @zuji = [] # 先定义
+    @zujisprite = [] # 先定义
+    update_zuji
+  end
+  #--------------------------------------------------------------------------
+  # ● 释放
+  #--------------------------------------------------------------------------
+  def dispose
+    for sprite in @zujisprite # 释放精灵
+      sprite.dispose
+    end
+    @zujisprite = []
+    dispose_v3
+  end
+  #--------------------------------------------------------------------------
+  # ● 刷新阻激
+  #--------------------------------------------------------------------------
+  def update_zuji
+    o = 200
+    if Icons # 有图用图，没图纯色填充
+      bitmap = RPG::Cache.icon(Iconname)
+    else
+      o = 155
+      color = Color.new(255, 0, 0)
+    end
+    if @zuji != nil and $game_player.zujixy != nil
+      for zuji in @zuji | $game_player.zujixy # 循环
+        index = (@zuji | $game_player.zujixy).index(zuji) # 获取位置
+        if @zujisprite[index] != nil # 精灵存在的情况下
+          if $game_player.zujixy.index(zuji) == nil # 主角移动过的情况下
+            wd = [($game_player.real_x - ($game_player.x * 128)).abs,($game_player.real_y - ($game_player.y * 128)).abs].max
+            @zujisprite[index].opacity = o * (wd / 128.0) # 渐变
+            if @zujisprite[index].opacity == 0 # 如果已经完全透明
+              @zujisprite[index].dispose # 释放精灵
+              @zuji.delete_at(index) # 删除该坐标
+              @zujisprite.delete_at(index) # 删除该精灵
+              next
+            end
+          elsif $game_player.moving? # 移动中的情况下
+            wd = [($game_player.real_x - ($game_player.x * 128)).abs,($game_player.real_y - ($game_player.y * 128)).abs].max
+            @zujisprite[index].opacity = o - (o * (wd / 128.0)) if @zujisprite[index].opacity != o # 渐变
+          else # 透明度
+            @zujisprite[index].opacity = o
+          end
+        else # 不存在的情况下
+          @zuji = @zuji | $game_player.zujixy
+          @zujisprite[index] = Sprite.new(@viewport1) # 那就创建出来
+          wd = [($game_player.real_x - ($game_player.x * 128)).abs,($game_player.real_y - ($game_player.y * 128)).abs].max
+          @zujisprite[index].opacity = o - (o * (wd / 128.0)) # 透明度
+          @zujisprite[index].bitmap = Bitmap.new(30,30)
+          if Icons  # 有图用图，没图纯色填充
+            @zujisprite[index].bitmap.blt(0,0,bitmap,Rect.new(0, 0, 30, 30))
+          else
+            @zujisprite[index].bitmap.fill_rect(Rect.new(0, 0, 30, 30),color)
+          end
+        end
+        @zujisprite[index].x = ((zuji[0]*32) - ($game_map.display_x / 4)) + 1 # 定义X坐标
+        @zujisprite[index].y = ((zuji[1]*32) - ($game_map.display_y / 4)) + 1 # 定义Y坐标
+      end
+    end
+  end
+  #--------------------------------------------------------------------------
+  # ● 刷新画面
+  #--------------------------------------------------------------------------
+  def update
+    update_zuji # 刷新阻激
+    update_v3
+  end
+end  # Sprite部分结束
+class Map_damage
+  #--------------------------------------------------------------------------
+  # ● 重定义
+  #--------------------------------------------------------------------------
+  alias refresh_v3 refresh
+  #--------------------------------------------------------------------------
+  # ● 事件结束
+  #--------------------------------------------------------------------------
+  def refresh
+    refresh_v3
+    $game_player.map_zuji
+  end
+end
+class Game_Player < Game_Character
+  #--------------------------------------------------------------------------
+  # ● 定义变量
+  #--------------------------------------------------------------------------
+  attr_accessor :zujixy
+  #--------------------------------------------------------------------------
+  # ● 重定义
+  #--------------------------------------------------------------------------
+  alias increase_steps_v3 increase_steps
+  #--------------------------------------------------------------------------
+  # ● 移动后要重新判定
+  #--------------------------------------------------------------------------
+  def increase_steps
+    increase_steps_v3
+    map_zuji(true) if Zuji_size < [$game_map.width,$game_map.height].min
+  end
+  #--------------------------------------------------------------------------
+  # ● 判定部分
+  #--------------------------------------------------------------------------
+  def map_zuji(steps = false)
+    @rc=EnemyReady.refresh
+    newzujixy = []
+    for vx in [@x - [Zuji_size,1].max,0].max..[@x + [Zuji_size,1].max,$game_map.width - 1].min
+      for vy in [@y - [Zuji_size,1].max,0].max..[@y + [Zuji_size,1].max,$game_map.height - 1].min
+        if steps and @zujixy.include?([vx,vy])
+          newzujixy.push([vx,vy])
+          next
+        end
+        next if (Zuji_size == 0 and (vx-@x).abs + (vy-@y).abs == 2) or (vx == @x and vy == @y)
+        next unless $game_map.passable?(vx,vy,0) # 不能通行的情况下,下一个
+        push = false
+        #--------------------------------------------------------------------
+        # ● 如有其它需要，请自行添加判定
+        #--------------------------------------------------------------------
+        if $game_party.item_number($game_variables[109])<1#没有不受领域伤害的物品时
+          for i in 0...$game_variables[72].size
+            xx=($game_map.events[$game_variables[72][i]].x-vx).abs
+            yy=($game_map.events[$game_variables[72][i]].y-vy).abs
+            ee=($game_map.events[$game_variables[72][i]].event.name[6,3]).to_i
+            lenth=$data_enemies[ee].mdef#领域怪的伤害范围
+            if lenth==0#范围0表示十字领域
+              if (xx==1 and yy<1) or (xx<1 and yy==1)
+                newzujixy.push([vx,vy])
+                push = true
+                break # 退出循环
+              end
+            else#大于0表示九宫领域
+              if (xx+yy<=(lenth*2) and xx<=lenth and yy<=lenth)
+                newzujixy.push([vx,vy])
+                push = true
+                break # 退出循环
+              end
+            end
+          end
+        end#领域怪
+        next if push # 如果已经添加，下一个
+        if $game_party.item_number($game_variables[118])<1#没有不受夹击伤害的物品时
+          px=vx
+          py=vy
+          if $game_map.have_an_event?(px-1,py)==true
+            ee=$game_map.check_event(px-1,py)
+            if $game_map.events[ee].event.name[0,6]=="怪物"  && $game_map.events[ee].character_name!=""
+              if $game_map.have_an_event?(px+1,py)==true
+              ee2=$game_map.check_event(px+1,py)
+                if $game_map.events[ee2].event.name[0,6]=="怪物" && $game_map.events[ee2].character_name!=""
+                  ee=$game_map.events[ee].event.name[6,3].to_i
+                  ee2=$game_map.events[ee2].event.name[6,3].to_i
+                  e = Enemy_property.new(ee)
+                  if ee==ee2 and e.got_p(24) and e.got_damage > 0
+                    aa=$data_enemies[ee].name.split(',')[1].to_i
+                    if aa==0
+                      if $game_actors[$game_variables[1]+1].hp>1
+                        newzujixy.push([vx,vy])
+                        push = true
+                      end
+                    else
+                      newzujixy.push([vx,vy])
+                      push = true
+                    end
+                  end
+                end
+              end
+            end
+          end
+          next if push # 如果已经添加，下一个
+          if $game_map.have_an_event?(px,py+1)==true
+            ee=$game_map.check_event(px,py+1)
+            if $game_map.events[ee].event.name[0,6]=="怪物" && $game_map.events[ee].character_name!=""
+              if $game_map.have_an_event?(px,py-1)==true
+                ee2=$game_map.check_event(px,py-1)
+                if $game_map.events[ee2].event.name[0,6]=="怪物" && $game_map.events[ee2].character_name!=""
+                  ee=$game_map.events[ee].event.name[6,3].to_i
+                  ee2=$game_map.events[ee2].event.name[6,3].to_i
+                  e = Enemy_property.new(ee)
+                  if ee==ee2 and e.got_p(24) and e.got_damage > 0
+                    aa=$data_enemies[ee].name.split(',')[1].to_i
+                    if aa==0
+                      if $game_actors[$game_variables[1]+1].hp>1
+                        newzujixy.push([vx,vy])
+                        push = true
+                      end
+                    else
+                      newzujixy.push([vx,vy])
+                      push = true
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end#夹击怪
+        next if push # 如果已经添加，下一个
+        if $game_party.item_number($game_variables[120])<1#没有阻止退敌的物品时
+          for i in 0...$game_variables[119].size
+            xx=($game_map.events[$game_variables[119][i]].x-vx).abs
+            yy=($game_map.events[$game_variables[119][i]].y-vy).abs
+            kx=$game_map.events[$game_variables[119][i]].x
+            ky=$game_map.events[$game_variables[119][i]].y
+            px=vx
+            py=vy
+            ee=$game_map.events[$game_variables[119][i]].event.name[6,3].to_i
+            if (xx==1 and yy<1) or (xx<1 and yy==1)
+              newzujixy.push([vx,vy])
+              push = true
+              break # 退出循环
+            end
+          end
+        end#退敌怪
+        next if push # 如果已经添加，下一个
+=begin
+        if $game_party.item_number($game_variables[120])<1#没有阻止巡猎的物品时
+          for i in 0...$game_variables[241].size
+            xx=($game_map.events[$game_variables[241][i]].x-vx).abs
+            yy=($game_map.events[$game_variables[241][i]].y-vy).abs
+            ee=$game_map.events[$game_variables[241][i]].event.name[6,3].to_i
+            if (xx+yy <= 4) and (xx<=2 and yy<=2) 
+              newzujixy.push([vx,vy])
+              push = true
+              break # 退出循环
+            end
+          end
+        end#巡猎怪
+=end
+        next if push # 如果已经添加，下一个
+        #--------------------------------------------------------------------
+        # ● 判定部分结束
+        #--------------------------------------------------------------------
+      end
+    end
+    @zujixy = newzujixy
+  end
+end
