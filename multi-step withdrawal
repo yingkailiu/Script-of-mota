@@ -1,0 +1,265 @@
+#=begin
+#简易多步撤回
+module BackSpace#1代表true
+  SAVE_VAR=                399       #记录存储的变量ID
+  MAX_SAVEDATA=             15       #最高存档序号
+  DOOR=                      1       #门
+  MONSTER=                   1       #怪物
+  BLOOD_BOTTLE=              0       #血瓶
+  MAGIC=                     0       #魔法
+  GEMSTONE=                  0       #宝石
+  UPPER_LIMIT=               0       #上限
+  KEY=                       0       #钥匙
+end
+if !FileTest.exist?("Save/zt.rxdata")
+  save_data([],"Save/zt.rxdata")
+end
+class AutoSave
+  def main
+    save_data([],"Save/zt.rxdata")
+    id=$game_variables[BackSpace::SAVE_VAR]%BackSpace::MAX_SAVEDATA
+    @filename="AutoSave/motaAutoSave"+sprintf("%03d",id)+".rxdata"
+    if !FileTest.exist?(@filename)
+      # 演奏冻结 SE  
+      Audio.se_play("Audio/SE/004-System04", 80, 100)
+      $game_switches[99]=true
+      $scene = Scene_Map.new
+      return
+    end
+    file = Zlib::GzipReader.open(@filename)
+    # 读取描绘存档文件用的角色数据
+    characters = Marshal.load(file)
+    # 读取测量游戏时间用画面计数
+    save_gfc = Marshal.load(file)
+    # 读取校验
+    crcs = Marshal.load(file)
+    # 读取文档字串
+    strings = Marshal.load(file)
+    # 校验检测
+    key = 20120430
+    strings.each_index do |i|
+      key = Zlib.crc32(strings[i],key)
+      unless crcs[i] == key
+      file.close
+      raise "file check error"
+      return
+      end
+    end
+    variables=Marshal.load(Zlib::Inflate.inflate(strings[1]))
+    if $game_variables[BackSpace::SAVE_VAR]-variables[BackSpace::SAVE_VAR] !=1
+      id=load_data("AutoSave/motaAutoSave.rxdata") if 
+      FileTest.exist?("AutoSave/motaAutoSave.rxdata")
+      if id==nil || $game_variables[BackSpace::SAVE_VAR]==id
+        file.close
+        # 演奏冻结 SE  
+        Audio.se_play("Audio/SE/004-System04", 80, 100)
+        $game_switches[99]=true
+        $scene = Scene_Map.new
+        return
+      else
+        $game_variables[BackSpace::SAVE_VAR]=id
+        $scene=AutoSave.new
+        return
+      end
+    end
+    # 读取各种游戏对像
+    Graphics.frame_count=save_gfc
+    $game_variables=variables
+    $game_system = Marshal.load(Zlib::Inflate.inflate(strings[0]))
+    $game_self_switches = Marshal.load(Zlib::Inflate.inflate(strings[2]))
+    $game_switches = Marshal.load(Zlib::Inflate.inflate(strings[3]))
+    $game_troop = Marshal.load(Zlib::Inflate.inflate(strings[4]))
+    $game_map = Marshal.load(Zlib::Inflate.inflate(strings[5]))
+    $game_player = Marshal.load(Zlib::Inflate.inflate(strings[6]))
+    $game_screen = Marshal.load(Zlib::Inflate.inflate(strings[7]))
+    $game_actors = Marshal.load(Zlib::Inflate.inflate(strings[8]))
+    $game_party = Marshal.load(Zlib::Inflate.inflate(strings[9]))
+    $floorenemies = Marshal.load(Zlib::Inflate.inflate(strings[10]))
+    $fledam = Marshal.load(Zlib::Inflate.inflate(strings[11]))
+    $movedevents = Marshal.load(Zlib::Inflate.inflate(strings[12]))
+    if strings.size>13
+      $new_map = Marshal.load(Zlib::Inflate.inflate(strings[13]))
+    else
+      $new_map=[]
+    end
+    if $game_system.magic_number != $data_system.magic_number
+      # 重新装载地图
+      $game_map.setup($game_map.map_id)
+      $game_player.center($game_player.x, $game_player.y)
+    end
+    # 刷新同伴成员
+    $game_party.refresh
+    file.close
+    # 还原 BGM、BGS
+    $game_system.bgm_play($game_system.playing_bgm)
+    $game_system.bgs_play($game_system.playing_bgs)
+
+    # 刷新地图 (执行并行事件)
+    $game_map.update
+    Graphics.update
+    # 刷新输入信息
+    Input.update
+    # 切换到地图画面
+    $scene = Scene_Map.new
+  end
+end
+class Scene_Map
+  def spriteset
+    @spriteset
+  end
+  def game_with_draw(dname="AutoSave")
+    return if $game_system.save_disabled
+    unless File.directory? ("./" + dname)
+      Dir.mkdir(dname)
+    end
+    begin @spriteset.dispose_lights_ex rescue () end
+    $save_gfc=Graphics.frame_count
+    id=$game_variables[BackSpace::SAVE_VAR]+1
+    fid=id%BackSpace::MAX_SAVEDATA
+    filename=dname+"/motaAutoSave"+sprintf("%03d",fid)+".rxdata"
+    #if !FileTest.exist?(@filename)
+    file = Zlib::GzipWriter.open(filename,9)
+    # 生成描绘存档文件用的角色图形
+    characters = []
+    for i in 0...$game_party.actors.size
+      actor = $game_party.actors[i]
+      characters.push([actor.character_name, actor.character_hue,actor.id])
+    end
+    strings = []
+    # 写入描绘存档文件用的角色数据
+    Marshal.dump(characters,file)
+    # 写入测量游戏时间用画面计数
+    Marshal.dump(Graphics.frame_count,file)
+    # 增加 1 次存档次数
+    $game_system.save_count += 1
+    # 保存魔法编号
+    # (将编辑器保存的值以随机值替换)
+    $game_system.magic_number = $data_system.magic_number
+   
+    # 写入各种游戏对像
+    $game_switches[4]=true
+    save_map={}
+    for i in $game_map.events.keys.sort
+      save_map[i]=$game_map.events[i].sprite
+      $game_map.events[i].sprite=nil
+    end
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_system)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_variables)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_self_switches)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_switches)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_troop)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_map)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_player)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_screen)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_actors)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($game_party)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($floorenemies)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($fledam)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($movedevents)))
+    strings.push(Zlib::Deflate.deflate(Marshal.dump($new_map)))
+    for i in $game_map.events.keys.sort
+      $game_map.events[i].sprite=save_map[i]
+    end
+    $game_variables[BackSpace::SAVE_VAR]=id
+    #保存当前自动存档的序号
+    save_data($game_variables[BackSpace::SAVE_VAR],dname+"/motaAutoSave.rxdata")
+    # 计算校验值
+    crcs = []
+    key = 20120430#SAVE_KEY
+    strings.each do |i|
+      key = Zlib.crc32(i,key)
+      crcs.push(key)
+    end
+    Marshal.dump(crcs,file)
+    Marshal.dump(strings,file)
+    file.close
+    begin @spriteset.setup_lights_ex rescue () end
+#    $game_switches[71]=true
+  end
+end
+class Game_Player < Game_Character
+  #--------------------------------------------------------------------------
+  # ● 正面事件的启动判定
+  #--------------------------------------------------------------------------
+  alias zt_check_event_trigger_there check_event_trigger_there
+  def check_event_trigger_there(triggers)
+    result = false
+    if $game_switches[18]
+      return result
+    end
+    # 事件执行中的情况下
+    if $game_system.map_interpreter.running?
+      return result
+    end
+    #自动存档确认判定
+    if auto_save_check(@x,@y,@direction)
+      $scene.game_with_draw
+    end
+    zt_check_event_trigger_there(triggers)
+  end
+  #--------------------------------------------------------------------------
+  # ● 接触事件启动判定
+  #--------------------------------------------------------------------------
+  alias zt_check_event_trigger_touch check_event_trigger_touch
+  def check_event_trigger_touch(x, y)
+    result = false
+    # 事件执行中的情况下
+    if $game_system.map_interpreter.running?
+      return result
+    end
+    #自动存档确认判定
+    if auto_save_check(@x,@y,@direction)
+      $scene.game_with_draw
+    end
+    zt_check_event_trigger_touch(x, y)
+  end
+  #--------------------------------------------------------------------------
+  # ● 自动存档确认判定
+  #--------------------------------------------------------------------------
+  def auto_save_check(x,y,d)
+    return false if $save_gfc==Graphics.frame_count
+    return false if Time.now-File.mtime("Save/zt.rxdata")<1
+    new_x = x + (d == 6 ? 1 : d == 4 ? -1 : 0)
+    new_y = y + (d == 2 ? 1 : d == 8 ? -1 : 0)
+    return false if (!$game_map.passable?(x, y, d, self) || !$game_map.passable?(new_x, new_y, 10 - d))
+    $game_map.events.each_value{ |s|
+      if s.x==new_x && s.y==new_y
+        name=s.event.name
+        return false if s.moving? || s.jumping?
+        return false if name=="dead"
+        return true if name[0,1]=="A"        && false
+        return true if name.include?("血瓶") && BackSpace::BLOOD_BOTTLE==1
+        return true if name.include?("魔力") && BackSpace::MAGIC==1
+        return true if name.include?("钥匙") && BackSpace::KEY==1
+        return true if name.include?("宝石") && BackSpace::GEMSTONE==1
+        return true if name.include?("怪物") && BackSpace::MONSTER==1 && $game_switches[10]
+        return true if name.include?("上限") && BackSpace::UPPER_LIMIT==1
+        if name[3,3]=="门" && BackSpace::DOOR==1
+          return true if name[0,3]=="黄" && $game_party.item_number(1)  != 0
+          return true if name[0,3]=="蓝" && $game_party.item_number(2)  != 0
+          return true if name[0,3]=="红" && $game_party.item_number(3)  != 0
+          return true if name[0,3]=="绿" && $game_party.item_number(41) != 0
+        end
+        return false
+      end
+    }
+    return false
+  end
+end
+class Scene_Map
+  alias zt_update update
+  def update
+    zt_update
+    return if !($game_switches[49] && $game_switches[10])
+    if Kboard.press?($R_Key_BACK)
+      $scene=AutoSave.new
+      return
+    end
+  end
+end
+class AutoSave
+  def initialize
+    @filename="Save/AutoSave.rxdata"
+  end
+end
+#=end
