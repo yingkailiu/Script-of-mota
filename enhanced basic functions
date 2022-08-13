@@ -1,0 +1,456 @@
+class Bitmap
+  #--------------------------------------------------------------------------
+  # ● 描绘文本
+  #    返回这段文本描绘完成后最宽的坐标[maxtextx, maxtexty, setx]
+  #    text      : 文本内容
+  #    writex, y : 描绘文本的起始坐标（默认左上角）
+  #    setx      : 用于换页的定位坐标（默认左上角）
+  #    pagewidth : 每一行文本的最大宽度（默认为Bitmap宽度）
+  #    rowspace  : 行距（默认0，Window_Message为10）
+  #--------------------------------------------------------------------------
+  #    控制码功能
+  #    \c[n]      : 更换字体颜色
+  #    \s[n]      : 更改字体大小
+  #    \n[]       : 换行
+  #    \page[]    : 换页
+  #    \bitmap[v] : 显示变量v表示的图片
+  #    \item[n]   : 显示物品图标+名称
+  #    \item1[n]  : 显示物品图标
+  #    \item2[n]  : 显示物品名称
+  #    \weapon, \armor : 同\item
+  #    \eval[]    : 执行代码，\eval[xxx]等同于#{xxx}
+  #--------------------------------------------------------------------------
+  def set_text(text, writex = 0, writey = 0, setx = 0,
+    pagewidth = self.width, rowspace = 0)
+    origin_text = text
+    text = text.clone
+    origin_setx = setx
+    maxtextx = 0
+    maxtexty = 0
+    maxlinesize = self.height
+    # 设置描绘单行文本的Bitmap
+    line_bitmap = Bitmap.new(self.width, self.height + maxlinesize)
+    line_bitmap.font = font.clone
+    linesize = font.size
+    linehead = true
+    # 设置相关的块，方便后续调用
+    # 换页
+    newpage = Proc.new{
+      maxtexty = writey if writey > maxtexty
+      setx += pagewidth + 8
+      maxtextx = 0
+      writex = 0
+      writey = 0
+      linehead = true
+    }
+    # 换行
+    newline = Proc.new{
+      # 根据真正的行高调整位置
+      maxtextx = writex if writex > maxtextx
+      bltx = setx
+      blty = writey
+      newpage.call if writey + linesize + rowspace / 2 > self.height
+      blt(setx - bltx, writey - blty + linesize - maxlinesize,
+        line_bitmap, line_bitmap.rect)
+      line_bitmap.clear
+      writex = 0
+      writey += linesize + rowspace
+      linesize = line_bitmap.font.size
+      linehead = true
+    }
+    # 描绘图标
+    draw_icon = Proc.new{ |icon1|
+      iconwidth = icon1.width
+      newline.call if writex + iconwidth + 4 > pagewidth
+      iconsize = icon1.height - rowspace / 2
+      # 图标大小超过行距则下对齐，否则居中对齐
+      if iconsize > linesize
+        linesize = iconsize 
+      else
+        iconsize = (linesize + icon1.height) / 2
+      end
+      # 图标和字之间间隔4像素
+      line_bitmap.blt(writex + setx + 4, writey + maxlinesize - iconsize,
+        icon1, Rect.new(0, 0, icon1.width, icon1.height))
+      writex += iconwidth + 8
+      linehead = false
+    }
+    # 描绘文本（返回txthand）
+    draw_txt = Proc.new{ |txt, txthand|
+      # 描绘字符
+      charlength = 1
+      if txt[txthand] != nil
+        # 获取字符长度（UTF-8）
+        byte = txt[txthand]
+        if byte < 128
+          charlength = 1
+        else
+          charlength = 0
+          bit = 128
+          while byte > bit
+            byte -= bit
+            bit = bit >> 1
+            charlength += 1
+          end
+        end
+        # 数字内容合并处理
+        if txt[txthand, 1][/[0-9\+\-\.\%]/]
+          char = txt[txthand + 1, 1]
+          while char[/[0-9\+\-\.\%]/]
+            charlength += 1
+            char = txt[txthand + charlength, 1]
+            break if char == nil
+          end
+        end
+        char = txt[txthand, charlength]
+        char = char.to_num.to_text unless char == char.to_num
+        textsize = line_bitmap.font.size
+        textwidth = line_bitmap.text_size(char).width
+        newline.call if writex + textwidth > pagewidth
+        linesize = textsize if textsize > linesize
+        line_bitmap.draw_text(writex + setx,
+          writey + maxlinesize - textsize, textwidth, textsize, char)
+        writex += textwidth
+        txthand += charlength
+        linehead = false if textwidth > 0
+      else
+        txthand += 1
+      end
+      txthand
+    }
+    # 单字符循环处理
+    texthand = 0
+    last_color = line_bitmap.font.color.clone
+    last_size = line_bitmap.font.size
+    loop do
+      # 处理并删掉\X[xxx]
+      while text[texthand, 1] == "\\"
+        text.sub!(/\\(\w+)/, "")
+        kind = $1.upcase
+        if text[texthand, 1] == "["
+          bracket = 1
+          str = ""
+          text[texthand, 1] = ""
+          while bracket > 0
+            char = text[texthand, 1]
+            text[texthand, 1] = ""
+            if char == "["
+              bracket += 1
+            elsif char == "]"
+              bracket -= 1
+            end
+            str += char if bracket > 0
+            raise(ArgumentError, origin_text) if char == ""
+          end
+          kindnum = str.empty? ? nil : str.to_num
+        else
+          kindnum = 0
+        end
+        case kind
+        when "C" # 设置颜色（无参数表示还原上一个颜色）
+          if kindnum == nil
+            line_bitmap.font.color = last_color
+          else
+            last_color = line_bitmap.font.color.clone
+            line_bitmap.font.color = text_color(kindnum)
+          end
+        when "S" # 设置字体大小（无参数表示还原上一个大小）
+          if kindnum == nil
+            line_bitmap.font.size = last_size
+          else
+            last_size = line_bitmap.font.size
+            line_bitmap.font.size = kindnum
+            linesize = kindnum if linehead
+          end
+        when "N" # 换行
+          newline.call
+        when "PAGE" # 换页
+          newline.call
+          newpage.call
+        when "BITMAP" # 插入图片
+          draw_icon.call(eval(kindnum))
+        when /ITEM([12]*)/ # 描绘物品图标
+          item = $data_items[kindnum]
+          num = $1.to_i
+          num = 3 if num == 0
+          if num & 1 > 0
+            draw_icon.call(RPG::Cache.icon(item.icon_name)) 
+          end
+          if num & 2 > 0
+            text[texthand, 0] = "\\c[#{item.name_color}]#{item.name}\\c[]"
+          end
+        when /WEAPON([12]*)/ # 描绘武器图标
+          weapon = $data_weapons[kindnum]
+          num = $1.to_i
+          num = 3 if num == 0
+          if num & 1 > 0
+            draw_icon.call(RPG::Cache.icon(weapon.icon_name)) 
+          end
+          if num & 2 > 0
+            text[texthand, 0] = "\\c[#{weapon.name_color}]#{weapon.name}\\c[]"
+          end
+        when /ARMOR([12]*)/ # 描绘防具图标
+          armor = $data_armors[kindnum]
+          num = $1.to_i
+          num = 3 if num == 0
+          if num & 1 > 0
+            draw_icon.call(RPG::Cache.icon(armor.icon_name)) 
+          end
+          if num & 2 > 0
+            text[texthand, 0] = "\\c[#{armor.name_color}]#{armor.name}\\c[]"
+          end
+        when "EVAL" # 代入代码
+          text[texthand, 0] = "#{eval(kindnum)}"
+        end
+      end
+      # 处理换行
+      if text[texthand, 1] == "\n"
+        newline.call
+        texthand += 1
+        next
+      end
+      # 描绘字符
+      texthand = draw_txt.call(text, texthand)
+      break if texthand > text.size
+    end
+    newline.call unless linehead
+    maxtextx += setx - origin_setx
+    maxtexty = writey if writey > maxtexty
+    self.font = line_bitmap.font
+    return [maxtextx, maxtexty, setx]
+  end
+  #--------------------------------------------------------------------------
+  # ● 描绘文本简化版，一般用于只描绘一行字的情况
+  #    仅支持更改字体颜色，是否添加描边和\eval
+  #    返回文本的内容（去掉控制符）
+  #    text      : 描绘的文本内容
+  #    align     : 对齐方式（0=左对齐，1=居中对齐，2=右对齐）
+  #    outline   : 是否添加描边
+  #    rect_data : 描绘文本的矩形范围，默认整个Bitmap
+  #--------------------------------------------------------------------------
+  def set_text_simple(text, align = 0, outline = false, *rect_data)
+    rect_data = [rect] if rect_data.empty?
+    if rect_data[0].is_a?(Rect)
+      setx = rect_data[0].x
+      sety = rect_data[0].y
+      textwidth = rect_data[0].width
+      textheight = rect_data[0].height
+    elsif rect_data.size == 4
+      setx = rect_data[0]
+      sety = rect_data[1]
+      textwidth = rect_data[2]
+      textheight = rect_data[3]
+    else
+      raise(ArgumentError)
+    end
+    # 处理eval
+    origin_text = text
+    text = text.clone
+    texthand = 0
+    while texthand < text.size
+      if text[texthand, 6] == "\\eval["
+        bracket = 1
+        str = ""
+        text[texthand, 6] = ""
+        while bracket > 0
+          char = text[texthand, 1]
+          text[texthand, 1] = ""
+          if char == "["
+            bracket += 1
+          elsif char == "]"
+            bracket -= 1
+          end
+          str += char if bracket > 0
+          raise(ArgumentError, origin_text) if char == ""
+        end
+        text[texthand, 0] = "#{eval(str)}"
+      else
+        texthand += 1
+      end
+    end
+    # 检查显示的内容是否超过显示区域
+    origin_text = text
+    text_width = text_width(text)
+    word_width = text_width > textwidth ?
+      1.0 * textwidth / text_width : 1
+    text_width = text_width * word_width
+    # 读取每一段的文字和字体颜色
+    text_colors = [font.color.clone]
+    text = origin_text.split(/\\c\[.*?\]/)
+    origin_text.scan(/\\c\[(.*?)\]/){
+      set = $1
+      if set.empty?
+        text_colors.push(text_colors[-2] || font.color.clone)
+      else
+        c = set[/[^0-9]/] != nil ? set : set.to_i
+        text_colors.push(text_color(c))
+      end
+    }
+    # 将$xxx$替换成system_color
+    text.each_index{ |i|
+      if text[i][/\$.*?\$/]
+        text[i, 1] = text[i].split("$", 3)
+        text_colors[i, 1] = [text_colors[i], system_color, text_colors[i]]
+        retry
+      end
+    }
+    case align
+    when 0
+      x = 0
+    when 1
+      x = (textwidth - text_width) / 2
+    when 2
+      x = textwidth - text_width
+      x -= 2 if outline
+    end
+    x += setx
+    y = sety
+    if outline
+      contents_bitmap = Bitmap.new(width, height) 
+      contents_bitmap.font = font.clone
+      text.each_index{ |i|
+        textsize = text_size(text[i]).width * word_width
+        contents_bitmap.font.color = text_colors[i]
+        font.color = text_colors[i].to_hsv.change_value(0.2)
+        draw_text(x, y + 0, textsize, textheight, text[i])
+        draw_text(x, y + 2, textsize, textheight, text[i])
+        draw_text(x + 2, y + 0, textsize, textheight, text[i])
+        draw_text(x + 2, y + 2, textsize, textheight, text[i])
+        contents_bitmap.draw_text(x + 1, y + 1, textsize, textheight, text[i])
+        x += textsize
+      }
+      blt(0, 0, contents_bitmap, contents_bitmap.rect)
+    else
+      text.each_index{ |i|
+        textsize = text_size(text[i]).width * word_width
+        font.color = text_colors[i]
+        draw_text(x, y, textsize, textheight, text[i])
+        x += textsize
+      }
+    end
+    font.color = text_colors[0]
+  end
+  #--------------------------------------------------------------------------
+  # ● 返回简化版的描绘文字的宽度
+  #--------------------------------------------------------------------------
+  def text_width(text)
+    text = text.clone
+    text.gsub!(/\\c\[.*?\]/, "")
+    text.gsub!(/\$/, "")
+    return text_size(text).width
+  end
+end
+
+class String
+  #--------------------------------------------------------------------------
+  # ● 串转数
+  #    自动调节整数和浮点数
+  #--------------------------------------------------------------------------
+  def to_num
+    return self if self[/[^0-9\.]/]
+    if self[/\./]
+      return self.to_f
+    else
+      return self.to_i
+    end
+  end
+end
+
+class Numeric
+  Digits = []
+  Digits[1] = ["", "万", "亿", "兆"]
+  Digits[2] = ["", "W", "E", "Z"]
+  Digits[3] = ["", "K", "M", "G", "T"]
+  #--------------------------------------------------------------------------
+  # ● 将数字转换成带数位的格式
+  #    小数将最多保留5位有效数字
+  #     type  : 使用哪种数位 (1=中文，2=拼音，3=英文）
+  #--------------------------------------------------------------------------
+  def to_text(type = 1)
+    num = self
+    if !num.is_a?(Integer)
+      t = 5 - num.to_i.to_s.size
+      i = 1
+      loop do
+        n = num * i
+        if (n.round - n).abs < 0.001 || t <= 0
+          num = i > 1 ? 1.0 * n.round / i : n.round
+          break
+        end
+        i *= 10
+        t -= 1
+      end
+    end
+    if num < 0
+      num_write = -num
+      write_s = "-"
+    else
+      num_write = num
+      write_s = ""
+    end
+    digit = 0
+    decimal = "0"
+    # 10万以下直接显示原始数字，中文数位则是100万
+    if (type != 1 && num_write > 99999) || num_write > 999999
+      case type
+      when 1 # 中文数位 10^4一位
+        num2 = num_write
+        while num2 / 10000 >= 1
+          num2 = num2 / 10000
+          digit +=1
+          # 保留至少4位有效数字
+          if num2 < 10
+            decimal = "000"
+            d1 = (num_write / 10) % 1000
+            d2 = d1.to_s.size
+            decimal[-d2, d2] = d1.to_s
+          elsif num2 < 100
+            decimal = "00"
+            d1 = (num_write / 100) % 100
+            d2 = d1.to_s.size
+            decimal[-d2, d2] = d1.to_s
+          elsif num2 < 1000
+            decimal = ((num_write / 1000) % 10).to_s
+          end
+          num_write = num2.to_i
+        end
+      when 2 # 字母数位 10^4一位
+        num2 = num_write
+        while num2 / 10000 >= 1
+          num2 = num2 / 10000
+          digit +=1
+          # 保留至少3位有效数字
+          if num2 < 10
+            decimal = "00"
+            d1 = (num_write / 100) % 100
+            d2 = d1.to_s.size
+            decimal[-d2, d2] = d1.to_s
+          elsif num2 < 100
+            decimal = ((num_write / 1000) % 10).to_s
+          end
+          num_write = num2.to_i
+        end
+      when 3 # 字母数位 10^3一位
+        num2 = num_write
+        while num2 / 1000 >= 1
+          num2 = num2 / 1000
+          digit +=1
+          # 保留至少3位有效数字
+          if num2 < 10
+            decimal = "00"
+            d1 = (num_write / 10) % 100
+            d2 = d1.to_s.size
+            decimal[-d2, d2] = d1.to_s
+          elsif num2 < 100
+            decimal = ((num_write / 100) % 10).to_s
+          end
+          num_write = num2.to_i
+        end
+      end
+    end
+    write_s = write_s + num_write.to_s
+    write_s = write_s + "." + decimal if decimal.to_i > 0
+    write_s = write_s + Digits[type][digit]
+    return write_s
+  end
+end
