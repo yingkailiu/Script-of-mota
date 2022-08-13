@@ -1,0 +1,352 @@
+=begin
+#自动拾取脚本，可以自动拾取地图上的道具
+#此脚本放于末尾，Main之上
+
+ZiDongShiQuSW=199#X号开关开启后生效，0代表一直生效
+ZiDongShiQuVA=398#自动拾取使用变量
+ZiDongShiQu_TSSX=[]#DEBUFF属性
+
+#ZiDongShiQu_TSSX.push(1) #中毒
+#ZiDongShiQu_TSSX.push(2) #衰弱
+#ZiDongShiQu_TSSX.push(6) #迟缓
+#ZiDongShiQu_TSSX.push(14) #诅咒
+#ZiDongShiQu_TSSX.push(20) #退化
+#ZiDongShiQu_TSSX.push(33) #冰冻
+#ZiDongShiQu_TSSX.push(35) #腐毒
+#ZiDongShiQu_TSSX.push(36) #毒杀
+#ZiDongShiQu_TSSX.push(39) #美味
+#ZiDongShiQu_TSSX.push(46) #祖神庇佑
+
+#ZiDongShiQu_TSSX.push(26) #变身
+#ZiDongShiQu_TSSX.push(50) #回溯
+#ZiDongShiQu_TSSX.push(62) #现象
+
+ZiDongShiQuSPEED=7#拾取动画速度
+
+ZiDongShiQu=[]#白名单
+#ZiDongShiQu.push("盾牌") #不想自动拾取的事件可以直接注释掉
+
+ZiDongShiQu.push("红宝石")
+ZiDongShiQu.push("蓝宝石")
+ZiDongShiQu.push("绿宝石")
+ZiDongShiQu.push("黄宝石")
+
+ZiDongShiQu.push("血瓶")
+ZiDongShiQu.push("黄钥匙")
+ZiDongShiQu.push("蓝钥匙")
+ZiDongShiQu.push("红钥匙")
+ZiDongShiQu.push("绿钥匙")
+
+ZiDongShiQu.push("物品")
+ZiDongShiQulc=[]
+#ZiDongShiQulc=[[1,448],[1,559]]#特殊楼层禁用自动拾取
+
+class Scene_Map
+  alias zdsq_map_update update
+  alias zdsq_transfer_player transfer_player 
+  def update
+    if $game_variables[397]==0
+      $game_variables[397]=ZiDongShiQu
+      $game_variables[397].delete("血瓶")
+      $game_variables[397].delete("绿钥匙")
+    end
+    if $game_variables[ZiDongShiQuVA]!=0 && 
+      $game_variables[ZiDongShiQuVA]!=[]
+      for zdsq in $game_variables[ZiDongShiQuVA]
+        if $game_map.map_id!=zdsq[0]
+          $game_variables[ZiDongShiQuVA].delete(zdsq)
+          if $game_self_switches[[zdsq[0],zdsq[1],"ZDSQ"]]
+            $game_self_switches[[zdsq[0],zdsq[1],"A"]]=true
+            $game_self_switches.delete([zdsq[0],zdsq[1],"ZDSQ"])
+          end
+          next
+        end
+        e=$game_map.events[zdsq[1]]
+        p=$game_player
+        if e!=nil && e.real_xy(true)==p.real_xy
+          if $game_self_switches[[zdsq[0],zdsq[1],"ZDSQ"]]
+            $game_variables[ZiDongShiQuVA].delete(zdsq)
+            $game_self_switches[[zdsq[0],zdsq[1],"A"]]=true
+            $game_self_switches.delete([zdsq[0],zdsq[1],"ZDSQ"])
+          #else
+          #  e.start
+          end
+        end
+      end
+    end
+#------------------------------------------------------------------------------
+    zdsq_map_update
+#------------------------------------------------------------------------------
+    return if $game_switches[111]
+    return if ZiDongShiQulc.include?([$game_variables[3],$game_variables[2]]) 
+    return if $Flytofloor!=nil
+    return if $game_system.map_interpreter.running?
+    return if $DEBUG and Input.press?(Input::CTRL)
+    return if configing?
+    for i in $game_variables[195]
+      next if i == nil
+      next if $game_map.events[i] == nil
+      if $game_map.events[i].move_toward($game_player,1,true)!=[]
+        $zdsq=[]
+        for sj in $game_map.events.values
+          $zdsq.push(sj.id)
+        end
+        return
+      end
+    end#追杀怪
+    #$game_switches[49]=$game_variables[ZiDongShiQuVA]==[]
+    $game_variables[ZiDongShiQuVA]=[] if $game_variables[ZiDongShiQuVA]==0
+    if $game_variables[ZiDongShiQuVA]!=[] 
+      for zzzz in $game_variables[ZiDongShiQuVA]
+        if $game_map.map_id!=zzzz[0]
+          $game_variables[ZiDongShiQuVA].delete(zzzz)
+          if $game_self_switches[[zzzz[0],zzzz[1],"ZDSQ"]]
+            $game_self_switches[[zzzz[0],zzzz[1],"A"]]=true
+            $game_self_switches.delete([zzzz[0],zzzz[1],"ZDSQ"])
+          end
+        end
+      end
+    end
+    return if $game_variables[ZiDongShiQuVA]!=[] 
+    p=$game_player
+    $zdsqsw=1
+    $zdsq=[] if $zdsq==nil
+    zdsq=[]
+    @zdsq=[]
+    if $findpath.zdsq_mapdam($game_player.x,$game_player.y)
+      eea=1919810
+    else
+      eea=114514
+    end
+    for i in $game_map.events.values
+      next if $zdsq.include?(i.id)
+      next if i.list==nil
+      next if $game_self_switches[[$game_map.map_id,i.id,"A"]]
+      if i.event.name.include?("怪物") && $game_variables[196]==[] &&
+    i.list[0].code==117 && i.list[0].parameters==[1] && $game_switches[198] && 
+    $game_actors[$game_variables[1]+1].hp>0 && i.list.size==2
+        eid=i.event.name[6,4].to_i
+        $zdsq.push(i.id) if eid==0
+        e=Enemy_property.new(eid,i.x,i.y)
+        for debuff in ZiDongShiQu_TSSX
+          if $game_switches[153]
+            if debuff==1 || debuff==2 || debuff==6 || debuff==14 || debuff==33 || debuff==35
+              next
+            end
+          end
+          $zdsq.push(i.id) if got_p(eid,debuff) || eid==1267
+        end
+        next if $zdsq.index(i.id)
+        if eid!=nil && e.got_damage==0
+          for mz in $game_variables[149]
+            ex=$game_map.events[mz].x
+            ey=$game_map.events[mz].y
+            xx=(ex-$game_map.events[i.id].x).abs
+            yy=(ey-$game_map.events[i.id].y).abs
+            ee=($game_map.events[mz].event.name[6,4]).to_i
+            next if ee==0
+            range=$data_enemies[ee].mdef.to_f #+ $game_variables[243]
+            if (xx+yy<=range*2 and xx<=range and yy<=range)#&&!(xx==0 and yy==0)
+              ed=$game_map.events[mz].direction
+              ex+=(ed == 6 ? 1 : ed == 4 ? -1 : 0)
+              ey+=(ed == 2 ? 1 : ed == 8 ? -1 : 0)
+              if !$game_map.fuckhave_an_event?(ex,ey)
+                $zdsq.push(i.id)
+              end
+            end
+          end
+          next if $zdsq.index(i.id)
+          if $findpath.find_short_path(i.x,i.y,p.x,p.y,eea)==[]
+            $zdsq+=$findpath.event1+[i.id]
+            next
+          end
+          $game_self_switches[[$game_map.map_id,i.id,"ZDSQ:0"]]=true
+          i.start
+        else
+          $zdsq.push(i.id)
+        end
+        next
+      end
+      next if !$game_switches[ZiDongShiQuSW] && ZiDongShiQuSW!=0
+      $game_variables[397].each do |item|
+        next if !i.event.name.include?(item)
+        if $findpath.find_short_path(i.x,i.y,p.x,p.y,eea)!=[]
+          @zdsq+=$findpath.event1+[i.id]
+          break
+        else
+          $zdsq+=$findpath.event1+[i.id]
+          break
+        end
+      end
+    end
+    if @zdsq!=[]
+      for id in @zdsq
+        i=$game_map.events[id]
+        next if i.character_name==""
+        zs=i.list[0].parameters[0]
+        i.list[0].code=108 if 
+        i.list[0].code==101 && (zs.include?("钥匙") || zs.include?("金币"))
+        i.zdsq_sw
+        i.jump(p.x-i.x, p.y-i.y)
+        $game_variables[ZiDongShiQuVA].push([$game_map.map_id,id])
+        i.start
+      end
+    end
+    $zdsqsw=nil
+  end
+  def transfer_player
+    if $game_variables[ZiDongShiQuVA]!=0
+      for zdsq in $game_variables[ZiDongShiQuVA]
+        $game_variables[ZiDongShiQuVA].delete(zdsq)
+        if $game_self_switches[[zdsq[0],zdsq[1],"ZDSQ"]]
+          $game_self_switches[[zdsq[0],zdsq[1],"A"]]=true
+          $game_self_switches.delete([zdsq[0],zdsq[1],"ZDSQ"])
+        end
+      end
+    end
+    $zdsq=[]#场所移动时刷新
+    zdsq_transfer_player
+  end
+end
+#--------------------------------------------------------------------------
+#--------------------------------------------------------------------------
+#--------------------------------------------------------------------------
+class Game_Map
+  def zdsq_check_event(x, y)
+    events = []
+    for event in $game_map.events.values
+      if event.x == x and event.y == y
+        events.push(event.id)
+      end
+    end
+    return events
+  end
+  #--------------------------------------------------------------------------
+  # ● 计算特定方向推移一个图块的 X 坐标（没有循环修正）
+  #--------------------------------------------------------------------------
+  def x_with_direction(x, d)
+    x + (d == 6 ? 1 : d == 4 ? -1 : 0)
+  end
+  #--------------------------------------------------------------------------
+  # ● 计算特定方向推移一个图块的 Y 坐标（没有循环修正）
+  #--------------------------------------------------------------------------
+  def y_with_direction(y, d)
+    y + (d == 2 ? 1 : d == 8 ? -1 : 0)
+  end
+end
+
+class Game_Battler
+  def hp=(hp)
+    sw=$game_actors[$game_variables[1]+1].hp>hp ? true : false
+    @hp = [hp,0].max
+    # 解除附加的战斗不能状态
+    for i in 1...$data_states.size
+      if $data_states[i].zero_hp
+        if self.dead?
+          add_state(i)
+        else
+          remove_state(i)
+        end
+      end
+    end
+    $zdsq=[] if $zdsqsw==nil && sw#生命降低时刷新
+  end
+end
+class Game_Party
+  alias zdsq_refresh refresh
+  def gain_item(item_id, n)
+    if n<0 && $game_switches[169] && item_id !=41
+      return
+    end
+    # 更新 hash 的个数数据
+    if item_id > 0
+      @items[item_id] = [[item_number(item_id) + n, 0].max, 999].min
+    end
+    $zdsq=[] if $zdsqsw==nil#物品数量变更时刷新
+  end
+  def refresh
+    zdsq_refresh
+    if $game_variables[ZiDongShiQuVA]!=0
+      for zdsq in $game_variables[ZiDongShiQuVA]
+        $game_variables[ZiDongShiQuVA].delete(zdsq)
+        if $game_self_switches[[zdsq[0],zdsq[1],"ZDSQ"]]
+          $game_self_switches[[zdsq[0],zdsq[1],"A"]]=true
+          $game_self_switches.delete([zdsq[0],zdsq[1],"ZDSQ"])
+        end
+      end
+    end
+  end
+end
+if ZiDongShiQuSW!=0
+  class Game_Switches
+    def []=(switch_id, value)
+      if switch_id <= 5000
+        @data[switch_id] = value
+      end
+      $zdsq=[] if (switch_id==ZiDongShiQuSW or
+      switch_id==198 or switch_id==197) && value && $zdsqsw==nil#X号开关开启时刷新
+    end
+  end
+end
+class Game_SelfSwitches
+  def []=(key, value)
+    key[2]="ZDSQ" if $game_variables[ZiDongShiQuVA]!=0 && 
+    $game_variables[ZiDongShiQuVA].include?([key[0],key[1]])
+    @data[key] = value
+    if key[2]=="A" && value#独立开关A开启时刷新
+      $zdsq=[] if $zdsqsw==nil
+      if @data[[key[0],key[1],"ZDSQ:0"]]
+        @data.delete([key[0],key[1],"ZDSQ:0"])
+        $mapdamage_obj.canvas_visible(key[1]) 
+      end
+    end
+  end
+  def delete(key)
+    @data.delete(key)
+  end
+end
+class Game_Character
+  def zhuilie
+    @trg_x=0
+    @trg_y=0
+  end
+  def real_xy(sw=false)
+    @move_speed=ZiDongShiQuSPEED if sw
+    @x=$game_player.x
+    @y=$game_player.y
+    return [@real_x,@real_y]
+  end
+  def zdsq_sw
+    @direction_fix=true
+    @through=true
+    @walk_anime=false
+    @move_speed=ZiDongShiQuSPEED
+  end
+  def get_through
+    return @through
+  end
+end
+class Game_Event < Game_Character
+  alias zdsq_start start
+  def start
+    if $game_self_switches[[@map_id,@id,"ZDSQ"]]
+      $game_variables[ZiDongShiQuVA].delete([@map_id,@id])
+      $game_self_switches[[@map_id,@id,"A"]]=true
+      $game_self_switches.delete([@map_id,@id,"ZDSQ"])
+    else
+      zdsq_start
+    end
+  end
+end
+class Interpreter
+  alias zdsq_command_106 command_106
+  def command_106
+    zdsq_command_106 if !$game_self_switches[[@map_id,@event_id,"ZDSQ:0"]]
+  end
+end
+class Map_damage
+  def canvas_visible(i)
+    @canvas[i].visible=!@canvas[i].visible
+  end
+end
+=end
